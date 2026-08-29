@@ -179,6 +179,144 @@ app.post('/api/upload', upload.single('arquivo'), (req, res) => {
 
 
 // ============================================================
+// ROTA: EXPORTAR EXCEL COM DADOS DE SUCESSO
+// ============================================================
+
+app.post('/api/exportar-excel', (req, res) => {
+    try {
+        const { dados } = req.body;
+
+        console.log('[API] Recebido para exportar:', dados ? dados.length : 0, 'registros');
+
+        if (!dados || !Array.isArray(dados) || dados.length === 0) {
+            return res.status(400).json({
+                sucesso: false,
+                mensagem: 'Nenhum dado para exportar'
+            });
+        }
+
+        // Preparar dados para o Excel
+        const linhas = [];
+
+        // Processar cada pessoa com seus contratos
+        dados.forEach((item, idx) => {
+            try {
+                console.log(`[API] Processando item ${idx}: ${item.nome}`);
+
+                // Se tem contratos no objeto dados.lista_contratos_refin
+                if (item.dados && item.dados.lista_contratos_refin && Array.isArray(item.dados.lista_contratos_refin)) {
+                    const contratos = item.dados.lista_contratos_refin;
+                    
+                    // Criar uma linha para cada contrato
+                    contratos.forEach((contrato, contratoIdx) => {
+                        const row = {
+                            'Nome': item.nome,
+                            'CPF': item.cpf,
+                            'Contrato #': contratoIdx + 1,
+                            'Matrícula': contrato.matricula || '',
+                            'Proposta': contrato.proposta || '',
+                            'Valor Parcela': contrato.valor_parcela || '',
+                            'Saldo Devedor': contrato.saldo_devedor || '',
+                            'Saldo Devedor Atraso': contrato.saldo_devedor_atraso || '',
+                            'Observação': contrato.obs || ''
+                        };
+
+                        // Adicionar outros campos dinâmicos
+                        Object.keys(contrato).forEach(chave => {
+                            if (!row[chave] && chave !== 'matricula' && chave !== 'proposta' && 
+                                chave !== 'valor_parcela' && chave !== 'saldo_devedor' && 
+                                chave !== 'saldo_devedor_atraso' && chave !== 'obs') {
+                                row[chave] = contrato[chave];
+                            }
+                        });
+
+                        linhas.push(row);
+                    });
+                } else if (item.dados && Array.isArray(item.dados)) {
+                    // Se dados é um array direto (alternativa)
+                    item.dados.forEach((contrato, contratoIdx) => {
+                        const row = {
+                            'Nome': item.nome,
+                            'CPF': item.cpf,
+                            'Contrato #': contratoIdx + 1
+                        };
+
+                        // Adicionar todos os campos do contrato
+                        Object.keys(contrato).forEach(chave => {
+                            row[chave] = contrato[chave];
+                        });
+
+                        linhas.push(row);
+                    });
+                } else {
+                    // Se não tem contratos, criar uma linha apenas com os dados da pessoa
+                    const row = {
+                        'Nome': item.nome,
+                        'CPF': item.cpf,
+                        'Status': item.status,
+                        'Contratos': 0
+                    };
+                    linhas.push(row);
+                }
+            } catch (erroLinha) {
+                console.error(`[API] Erro ao processar item ${idx}:`, erroLinha.message);
+            }
+        });
+
+        console.log('[API] Total de linhas preparadas:', linhas.length);
+
+        if (linhas.length === 0) {
+            return res.status(400).json({
+                sucesso: false,
+                mensagem: 'Nenhuma linha foi processada'
+            });
+        }
+
+        // Criar worksheet
+        const ws = xlsx.utils.json_to_sheet(linhas);
+
+        // Ajustar largura das colunas
+        const colWidths = [];
+        if (linhas.length > 0) {
+            Object.keys(linhas[0]).forEach(col => {
+                colWidths.push({ wch: Math.max(col.length, 15) });
+            });
+            ws['!cols'] = colWidths;
+        }
+
+        // Criar workbook
+        const wb = xlsx.utils.book_new();
+        xlsx.utils.book_append_sheet(wb, ws, 'Contratos');
+
+        console.log('[API] Workbook criado com sucesso');
+
+        // Gerar arquivo em buffer
+        const buffer = xlsx.write(wb, { bookType: 'xlsx', type: 'buffer' });
+
+        console.log('[API] Buffer gerado, tamanho:', buffer.length, 'bytes');
+
+        // Enviar arquivo
+        const dataAtual = new Date().toISOString().split('T')[0];
+        const nomeArquivo = `contratos_${dataAtual}_${Date.now()}.xlsx`;
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}"`);
+        res.send(buffer);
+
+        console.log('[API] Arquivo enviado:', nomeArquivo);
+
+    } catch (erro) {
+        console.error('[API] Erro ao exportar:', erro);
+        console.error('[API] Stack:', erro.stack);
+        return res.status(500).json({
+            sucesso: false,
+            mensagem: 'Erro ao gerar planilha: ' + (erro instanceof Error ? erro.message : String(erro))
+        });
+    }
+});
+
+
+// ============================================================
 // ROTA: HEALTH CHECK
 // ============================================================
 

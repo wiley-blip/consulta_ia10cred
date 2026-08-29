@@ -471,6 +471,7 @@
                     </thead>
                     <tbody id="tabelaResumo"></tbody>
                 </table>
+                <button class="btn-upload" id="btnBaixarPlanilha" style="margin-top: 20px; display: none;">📥 Baixar Planilha de Sucessos</button>
             </div>
         </div>
     </div>
@@ -480,6 +481,7 @@
         const btnUpload = document.getElementById('btnUpload');
         const btnLimpar = document.getElementById('btnLimpar');
         const btnPesquisarContratos = document.getElementById('btnPesquisarContratos');
+        const btnBaixarPlanilha = document.getElementById('btnBaixarPlanilha');
         const loadingArquivo = document.getElementById('loadingArquivo');
         const resultadoArquivo = document.getElementById('resultadoArquivo');
         const tabelaPessoas = document.getElementById('tabelaPessoas');
@@ -491,6 +493,7 @@
 
         // Dados carregados do arquivo
         let pessoasCarregadas = [];
+        let dadosSucesso = []; // Armazenar dados completos dos sucessos
 
         function limparMensagensArquivo() {
             erroArquivoDiv.classList.remove('ativo');
@@ -505,6 +508,69 @@
         function mostrarInfoArquivo(mensagem) {
             infoArquivoDiv.textContent = 'ℹ️ ' + mensagem;
             infoArquivoDiv.classList.add('ativo');
+        }
+
+        // Gerar planilha Excel com dados de sucesso
+        function gerarPlanilhaExcel() {
+            if (dadosSucesso.length === 0) {
+                mostrarErroArquivo('Nenhum dado com sucesso para exportar');
+                return;
+            }
+
+            try {
+                btnBaixarPlanilha.disabled = true;
+                mostrarInfoArquivo('Gerando planilha...');
+
+                console.log('[DEBUG] Enviando dados:', dadosSucesso);
+
+                // Enviar dados para o servidor gerar o Excel
+                fetch('/api/exportar-excel', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        dados: dadosSucesso
+                    })
+                })
+                .then(response => {
+                    console.log('[DEBUG] Response status:', response.status);
+                    console.log('[DEBUG] Response headers:', response.headers);
+
+                    if (!response.ok) {
+                        return response.json().then(err => {
+                            throw new Error(err.mensagem || `HTTP ${response.status}`);
+                        });
+                    }
+                    return response.blob();
+                })
+                .then(blob => {
+                    console.log('[DEBUG] Blob recebido, tamanho:', blob.size);
+
+                    // Criar link para download
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    const dataAtual = new Date().toISOString().split('T')[0];
+                    a.download = `contratos_${dataAtual}.xlsx`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+
+                    mostrarInfoArquivo('Planilha baixada com sucesso!');
+                    btnBaixarPlanilha.disabled = false;
+                })
+                .catch(erro => {
+                    console.error('[DEBUG] Erro:', erro);
+                    mostrarErroArquivo('Erro ao gerar planilha: ' + erro.message);
+                    btnBaixarPlanilha.disabled = false;
+                });
+            } catch (erro) {
+                console.error('[DEBUG] Erro ao preparar:', erro);
+                mostrarErroArquivo('Erro ao preparar planilha: ' + erro.message);
+                btnBaixarPlanilha.disabled = false;
+            }
         }
 
         // Upload de arquivo
@@ -531,6 +597,7 @@
             resumoResultados.classList.remove('ativo');
             tabelaPessoas.innerHTML = '';
             btnPesquisarContratos.style.display = 'none';
+            btnBaixarPlanilha.style.display = 'none';
 
             try {
                 const formData = new FormData();
@@ -550,6 +617,7 @@
 
                     // Guardar dados das pessoas
                     pessoasCarregadas = data.pessoas;
+                    dadosSucesso = []; // Resetar dados de sucesso
 
                     // Preencher tabela
                     data.pessoas.forEach((pessoa, index) => {
@@ -589,6 +657,8 @@
             btnPesquisarContratos.disabled = true;
             progressoConsulta.classList.add('ativo');
             resumoResultados.classList.remove('ativo');
+            btnBaixarPlanilha.style.display = 'none';
+            dadosSucesso = []; // Resetar dados de sucesso
 
             const resultados = [];
             let sucessos = 0;
@@ -617,12 +687,26 @@
 
                     if (data.sucesso) {
                         sucessos++;
+                        // Armazenar dados completos de sucesso
+                        dadosSucesso.push({
+                            nome: pessoa.nome,
+                            cpf: pessoa.cpf,
+                            status: 'Sucesso',
+                            dados: data.dados || {}
+                        });
+
+                        // Calcular quantidade de contratos
+                        let qtdContratos = 0;
+                        if (data.dados && data.dados.lista_contratos_refin && Array.isArray(data.dados.lista_contratos_refin)) {
+                            qtdContratos = data.dados.lista_contratos_refin.length;
+                        }
+
                         resultados.push({
                             nome: pessoa.nome,
                             cpf: pessoa.cpf,
                             status: 'Sucesso',
                             statusClass: 'status-sucesso-texto',
-                            contratos: data.dados && Array.isArray(data.dados) ? data.dados.length : '—',
+                            contratos: qtdContratos > 0 ? qtdContratos : '—',
                             mensagem: data.mensagem || 'Consultado com sucesso'
                         });
                     } else {
@@ -677,7 +761,18 @@
             });
 
             resumoResultados.classList.add('ativo');
+            
+            // Mostrar botão de download apenas se houver sucessos
+            if (dadosSucesso.length > 0) {
+                btnBaixarPlanilha.style.display = 'block';
+            }
+
             btnPesquisarContratos.disabled = false;
+        });
+
+        // Baixar planilha
+        btnBaixarPlanilha.addEventListener('click', () => {
+            gerarPlanilhaExcel();
         });
 
         // Limpar
@@ -688,7 +783,9 @@
             resumoResultados.classList.remove('ativo');
             tabelaPessoas.innerHTML = '';
             pessoasCarregadas = [];
+            dadosSucesso = [];
             btnPesquisarContratos.style.display = 'none';
+            btnBaixarPlanilha.style.display = 'none';
             limparMensagensArquivo();
             arquivoInput.focus();
         });
