@@ -219,6 +219,139 @@
             background: #fafafa;
         }
 
+        .btn-pesquisar-contratos {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            margin-top: 15px;
+        }
+
+        .btn-pesquisar-contratos:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(40, 167, 69, 0.4);
+        }
+
+        .progresso-consulta {
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            color: #004085;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .progresso-consulta.ativo {
+            display: block;
+        }
+
+        .progresso-barra {
+            background: #ddd;
+            height: 20px;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progresso-preenchimento {
+            background: linear-gradient(90deg, #28a745 0%, #20c997 100%);
+            height: 100%;
+            width: 0%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .resumo-resultados {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .resumo-resultados.ativo {
+            display: block;
+        }
+
+        .resumo-header {
+            background: #e8f5e9;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            border-left: 4px solid #28a745;
+        }
+
+        .resumo-header h3 {
+            color: #155724;
+            margin-bottom: 5px;
+        }
+
+        .resumo-stats {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .stat-box {
+            background: white;
+            padding: 10px 15px;
+            border-radius: 5px;
+            border-left: 4px solid #28a745;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: #155724;
+        }
+
+        .tabela-resumo {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+
+        .tabela-resumo thead {
+            background: #28a745;
+            color: white;
+        }
+
+        .tabela-resumo th {
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        .tabela-resumo td {
+            padding: 10px 12px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .tabela-resumo tbody tr:hover {
+            background: #f5f5f5;
+        }
+
+        .tabela-resumo tbody tr:nth-child(even) {
+            background: #fafafa;
+        }
+
+        .status-sucesso-texto {
+            color: #28a745;
+            font-weight: 600;
+        }
+
+        .status-erro-texto {
+            color: #dc3545;
+            font-weight: 600;
+        }
+
         .erro {
             background: #fff3cd;
             border: 1px solid #ffc107;
@@ -291,6 +424,53 @@
                     </thead>
                     <tbody id="tabelaPessoas"></tbody>
                 </table>
+                <button class="btn-upload btn-pesquisar-contratos" id="btnPesquisarContratos" style="display: none;">🔎 Pesquisar Contratos</button>
+            </div>
+        </div>
+
+        <div class="progresso-consulta" id="progressoConsulta">
+            <div style="margin-bottom: 10px;">
+                <strong>Consultando:</strong> <span id="consultandoNome"></span>
+            </div>
+            <div class="progresso-barra">
+                <div class="progresso-preenchimento" id="progressoPreenchimento"></div>
+            </div>
+            <div style="font-size: 12px; text-align: right; color: #666;">
+                <span id="progressoTexto">0 / 0</span>
+            </div>
+        </div>
+
+        <div class="resumo-resultados" id="resumoResultados">
+            <div class="resumo-header">
+                <h3>✅ Resumo de Consultas</h3>
+                <div class="resumo-stats">
+                    <div class="stat-box">
+                        <div class="stat-label">Total Consultado</div>
+                        <div class="stat-value" id="totalConsultado">0</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Sucesso</div>
+                        <div class="stat-value" id="totalSucesso">0</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-label">Erro</div>
+                        <div class="stat-value" id="totalErro">0</div>
+                    </div>
+                </div>
+            </div>
+            <div class="resultado-body">
+                <table class="tabela-resumo">
+                    <thead>
+                        <tr>
+                            <th>Nome</th>
+                            <th>CPF</th>
+                            <th>Status</th>
+                            <th>Contratos</th>
+                            <th>Mensagem</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tabelaResumo"></tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -299,12 +479,18 @@
         const arquivoInput = document.getElementById('arquivo');
         const btnUpload = document.getElementById('btnUpload');
         const btnLimpar = document.getElementById('btnLimpar');
+        const btnPesquisarContratos = document.getElementById('btnPesquisarContratos');
         const loadingArquivo = document.getElementById('loadingArquivo');
         const resultadoArquivo = document.getElementById('resultadoArquivo');
         const tabelaPessoas = document.getElementById('tabelaPessoas');
         const statusArquivoBadge = document.getElementById('statusArquivoBadge');
         const erroArquivoDiv = document.getElementById('erroArquivo');
         const infoArquivoDiv = document.getElementById('infoArquivo');
+        const progressoConsulta = document.getElementById('progressoConsulta');
+        const resumoResultados = document.getElementById('resumoResultados');
+
+        // Dados carregados do arquivo
+        let pessoasCarregadas = [];
 
         function limparMensagensArquivo() {
             erroArquivoDiv.classList.remove('ativo');
@@ -341,7 +527,10 @@
             btnUpload.disabled = true;
             loadingArquivo.style.display = 'block';
             resultadoArquivo.classList.remove('ativo');
+            progressoConsulta.classList.remove('ativo');
+            resumoResultados.classList.remove('ativo');
             tabelaPessoas.innerHTML = '';
+            btnPesquisarContratos.style.display = 'none';
 
             try {
                 const formData = new FormData();
@@ -359,6 +548,9 @@
                     statusArquivoBadge.className = 'status-badge status-sucesso';
                     mostrarInfoArquivo(`Arquivo processado com sucesso! ${data.nomeArquivo}`);
 
+                    // Guardar dados das pessoas
+                    pessoasCarregadas = data.pessoas;
+
                     // Preencher tabela
                     data.pessoas.forEach((pessoa, index) => {
                         const row = document.createElement('tr');
@@ -371,6 +563,7 @@
                     });
 
                     resultadoArquivo.classList.add('ativo');
+                    btnPesquisarContratos.style.display = 'block';
                 } else {
                     statusArquivoBadge.textContent = '❌ Erro';
                     statusArquivoBadge.className = 'status-badge status-erro';
@@ -386,11 +579,116 @@
             }
         });
 
+        // Pesquisar contratos em lote
+        btnPesquisarContratos.addEventListener('click', async () => {
+            if (pessoasCarregadas.length === 0) {
+                mostrarErroArquivo('Nenhuma pessoa carregada');
+                return;
+            }
+
+            btnPesquisarContratos.disabled = true;
+            progressoConsulta.classList.add('ativo');
+            resumoResultados.classList.remove('ativo');
+
+            const resultados = [];
+            let sucessos = 0;
+            let erros = 0;
+
+            for (let i = 0; i < pessoasCarregadas.length; i++) {
+                const pessoa = pessoasCarregadas[i];
+                const percentual = Math.round(((i + 1) / pessoasCarregadas.length) * 100);
+
+                // Atualizar progresso
+                document.getElementById('consultandoNome').textContent = `${pessoa.nome} (${pessoa.cpf})`;
+                document.getElementById('progressoTexto').textContent = `${i + 1} / ${pessoasCarregadas.length}`;
+                document.getElementById('progressoPreenchimento').style.width = percentual + '%';
+                document.getElementById('progressoPreenchimento').textContent = percentual + '%';
+
+                try {
+                    const response = await fetch('/api/consultar', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ cpf: pessoa.cpf })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.sucesso) {
+                        sucessos++;
+                        resultados.push({
+                            nome: pessoa.nome,
+                            cpf: pessoa.cpf,
+                            status: 'Sucesso',
+                            statusClass: 'status-sucesso-texto',
+                            contratos: data.dados && Array.isArray(data.dados) ? data.dados.length : '—',
+                            mensagem: data.mensagem || 'Consultado com sucesso'
+                        });
+                    } else {
+                        erros++;
+                        resultados.push({
+                            nome: pessoa.nome,
+                            cpf: pessoa.cpf,
+                            status: 'Erro',
+                            statusClass: 'status-erro-texto',
+                            contratos: '—',
+                            mensagem: data.mensagem || 'Erro ao consultar'
+                        });
+                    }
+                } catch (erro) {
+                    erros++;
+                    resultados.push({
+                        nome: pessoa.nome,
+                        cpf: pessoa.cpf,
+                        status: 'Erro',
+                        statusClass: 'status-erro-texto',
+                        contratos: '—',
+                        mensagem: erro.message
+                    });
+                }
+
+                // Pequeno delay entre requisições
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+
+            // Ocultar progresso
+            progressoConsulta.classList.remove('ativo');
+
+            // Exibir resumo
+            document.getElementById('totalConsultado').textContent = pessoasCarregadas.length;
+            document.getElementById('totalSucesso').textContent = sucessos;
+            document.getElementById('totalErro').textContent = erros;
+
+            // Preencher tabela de resumo
+            const tabelaResumo = document.getElementById('tabelaResumo');
+            tabelaResumo.innerHTML = '';
+
+            resultados.forEach(resultado => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${resultado.nome}</td>
+                    <td>${resultado.cpf}</td>
+                    <td><span class="${resultado.statusClass}">${resultado.status}</span></td>
+                    <td>${resultado.contratos}</td>
+                    <td>${resultado.mensagem}</td>
+                `;
+                tabelaResumo.appendChild(row);
+            });
+
+            resumoResultados.classList.add('ativo');
+            btnPesquisarContratos.disabled = false;
+        });
+
         // Limpar
         btnLimpar.addEventListener('click', () => {
             arquivoInput.value = '';
             resultadoArquivo.classList.remove('ativo');
+            progressoConsulta.classList.remove('ativo');
+            resumoResultados.classList.remove('ativo');
             tabelaPessoas.innerHTML = '';
+            pessoasCarregadas = [];
+            btnPesquisarContratos.style.display = 'none';
             limparMensagensArquivo();
             arquivoInput.focus();
         });
