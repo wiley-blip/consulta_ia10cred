@@ -14,6 +14,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const xlsx = require('xlsx');
+const { put, list } = require('@vercel/blob');
 const { token_request } = require('./autenticacao.js');
 const { consultarContratosRefinanciamento } = require('./consultarContratosRefinanciamento.js');
 
@@ -30,20 +31,33 @@ const PORT = process.env.PORT || 3000;
 // CONFIGURAR MULTER PARA UPLOAD
 // ============================================================
 
-const uploadDir = path.join(__dirname, 'upload', 'dados');
-const historicoDir = path.join(__dirname, 'historico');
+const uploadDir = path.join('/tmp', 'upload', 'dados');
+const historicoPrefix = 'historico/';
+const localHistoricoDir = path.join(__dirname, 'historico');
+const usaBlob = Boolean(process.env.BLOB_READ_WRITE_TOKEN);
 
-// Garantir que as pastas existem
-if (!fs.existsSync(uploadDir)) {
-    fs.mkdirSync(uploadDir, { recursive: true });
+function ensureHistoricoStorage() {
+    if (!usaBlob && process.env.VERCEL) {
+        throw new Error('BLOB_READ_WRITE_TOKEN não está configurado na Vercel');
+    }
+
+    if (!usaBlob) {
+        fs.mkdirSync(localHistoricoDir, { recursive: true });
+    }
 }
-if (!fs.existsSync(historicoDir)) {
-    fs.mkdirSync(historicoDir, { recursive: true });
+
+function ensureUploadDir() {
+    fs.mkdirSync(uploadDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
-        cb(null, uploadDir);
+        try {
+            ensureUploadDir();
+            cb(null, uploadDir);
+        } catch (erro) {
+            cb(erro);
+        }
     },
     filename: (req, file, cb) => {
         const timestamp = Date.now();
@@ -126,6 +140,7 @@ app.post('/api/consultar', async (req, res) => {
 // ============================================================
 
 app.post('/api/upload', upload.single('arquivo'), (req, res) => {
+    let filePath;
     try {
         if (!req.file) {
             return res.status(400).json({
@@ -137,7 +152,7 @@ app.post('/api/upload', upload.single('arquivo'), (req, res) => {
         console.log('[API] Processando arquivo:', req.file.filename);
 
         // Ler o arquivo Excel
-        const filePath = req.file.path;
+        filePath = req.file.path;
         const workbook = xlsx.readFile(filePath);
         const sheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[sheetName];
@@ -179,6 +194,14 @@ app.post('/api/upload', upload.single('arquivo'), (req, res) => {
             sucesso: false,
             mensagem: 'Erro ao processar arquivo: ' + erro.message
         });
+    } finally {
+        if (filePath) {
+            try {
+                fs.rmSync(filePath, { force: true });
+            } catch (erro) {
+                console.error('[API] Erro ao remover upload temporário:', erro);
+            }
+        }
     }
 });
 
@@ -187,7 +210,7 @@ app.post('/api/upload', upload.single('arquivo'), (req, res) => {
 // ROTA: EXPORTAR EXCEL COM DADOS DE SUCESSO
 // ============================================================
 
-app.post('/api/exportar-excel', (req, res) => {
+app.post('/api/exportar-excel', async (req, res) => {
     try {
         const { dados } = req.body;
 
@@ -304,10 +327,18 @@ app.post('/api/exportar-excel', (req, res) => {
         const dataAtual = new Date().toISOString().split('T')[0];
         const nomeArquivo = `contratos_${dataAtual}_${Date.now()}.xlsx`;
 
-        // Salvar arquivo no histórico
-        const caminhoHistorico = path.join(historicoDir, nomeArquivo);
-        fs.writeFileSync(caminhoHistorico, buffer);
-        console.log('[API] Arquivo salvo no histórico:', caminhoHistorico);
+        ensureHistoricoStorage();
+        if (usaBlob) {
+            const blob = await put(`${historicoPrefix}${nomeArquivo}`, buffer, {
+                access: 'public',
+                addRandomSuffix: false,
+                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            });
+            console.log('[API] Arquivo salvo no histórico persistente:', blob.pathname);
+        } else {
+            fs.writeFileSync(path.join(localHistoricoDir, nomeArquivo), buffer);
+            console.log('[API] Arquivo salvo no histórico local:', nomeArquivo);
+        }
 
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}"`);
@@ -332,42 +363,10 @@ app.post('/api/exportar-excel', (req, res) => {
 
 app.post('/api/limpar-uploads', (req, res) => {
     try {
-        console.log('[API] Limpando pasta de uploads...');
-
-        if (!fs.existsSync(uploadDir)) {
-            return res.json({
-                sucesso: true,
-                mensagem: 'Pasta de uploads não encontrada'
-            });
-        }
-
-        // Ler todos os arquivos da pasta
-        const arquivos = fs.readdirSync(uploadDir);
-
-        let deletados = 0;
-
-        // Deletar cada arquivo
-        arquivos.forEach(arquivo => {
-            try {
-                const caminhoCompleto = path.join(uploadDir, arquivo);
-                
-                // Verificar se é arquivo
-                if (fs.statSync(caminhoCompleto).isFile()) {
-                    fs.unlinkSync(caminhoCompleto);
-                    deletados++;
-                    console.log(`[API] Deletado: ${arquivo}`);
-                }
-            } catch (erro) {
-                console.error(`[API] Erro ao deletar ${arquivo}:`, erro.message);
-            }
-        });
-
-        console.log(`[API] Total de arquivos deletados: ${deletados}`);
-
         return res.json({
             sucesso: true,
-            mensagem: `${deletados} arquivo(s) deletado(s)`,
-            deletados: deletados
+            mensagem: 'Uploads temporários são removidos após o processamento',
+            deletados: 0
         });
 
     } catch (erro) {
@@ -384,25 +383,32 @@ app.post('/api/limpar-uploads', (req, res) => {
 // ROTA: LISTAR ARQUIVOS DO HISTÓRICO
 // ============================================================
 
-app.get('/api/historico', (req, res) => {
+app.get('/api/historico', async (req, res) => {
     try {
-        if (!fs.existsSync(historicoDir)) {
-            return res.json({
-                sucesso: true,
-                arquivos: []
+        ensureHistoricoStorage();
+        let arquivos;
+
+        if (usaBlob) {
+            const resultado = await list({ prefix: historicoPrefix });
+            arquivos = resultado.blobs.map(blob => ({
+                nome: blob.pathname.slice(historicoPrefix.length),
+                tamanho: blob.size,
+                data: blob.uploadedAt.toISOString(),
+                dataFormatada: new Date(blob.uploadedAt).toLocaleString('pt-BR')
+            }));
+        } else {
+            arquivos = fs.readdirSync(localHistoricoDir).map(arquivo => {
+                const stats = fs.statSync(path.join(localHistoricoDir, arquivo));
+                return {
+                    nome: arquivo,
+                    tamanho: stats.size,
+                    data: stats.mtime.toISOString(),
+                    dataFormatada: new Date(stats.mtime).toLocaleString('pt-BR')
+                };
             });
         }
 
-        const arquivos = fs.readdirSync(historicoDir).map(arquivo => {
-            const caminhoCompleto = path.join(historicoDir, arquivo);
-            const stats = fs.statSync(caminhoCompleto);
-            return {
-                nome: arquivo,
-                tamanho: stats.size,
-                data: stats.mtime.toISOString(),
-                dataFormatada: new Date(stats.mtime).toLocaleString('pt-BR')
-            };
-        }).sort((a, b) => new Date(b.data) - new Date(a.data));
+        arquivos.sort((a, b) => new Date(b.data) - new Date(a.data));
 
         res.json({
             sucesso: true,
@@ -422,7 +428,7 @@ app.get('/api/historico', (req, res) => {
 // ROTA: DOWNLOAD DO HISTÓRICO
 // ============================================================
 
-app.get('/api/historico/download/:arquivo', (req, res) => {
+app.get('/api/historico/download/:arquivo', async (req, res) => {
     try {
         const { arquivo } = req.params;
         
@@ -434,21 +440,34 @@ app.get('/api/historico/download/:arquivo', (req, res) => {
             });
         }
 
-        const caminhoArquivo = path.join(historicoDir, arquivo);
-
-        // Verificar se arquivo existe
-        if (!fs.existsSync(caminhoArquivo)) {
-            return res.status(404).json({
-                sucesso: false,
-                mensagem: 'Arquivo não encontrado'
-            });
-        }
+        ensureHistoricoStorage();
 
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${arquivo}"`);
-        
-        const fileStream = fs.createReadStream(caminhoArquivo);
-        fileStream.pipe(res);
+
+        if (usaBlob) {
+            const resultado = await list({ prefix: `${historicoPrefix}${arquivo}` });
+            const blob = resultado.blobs.find(item => item.pathname === `${historicoPrefix}${arquivo}`);
+            if (!blob) {
+                return res.status(404).json({ sucesso: false, mensagem: 'Arquivo não encontrado' });
+            }
+
+            const response = await fetch(blob.url);
+            if (!response.ok || !response.body) {
+                throw new Error(`Falha ao baixar o arquivo armazenado (HTTP ${response.status})`);
+            }
+
+            for await (const chunk of response.body) {
+                res.write(chunk);
+            }
+            return res.end();
+        }
+
+        const caminhoArquivo = path.join(localHistoricoDir, arquivo);
+        if (!fs.existsSync(caminhoArquivo)) {
+            return res.status(404).json({ sucesso: false, mensagem: 'Arquivo não encontrado' });
+        }
+        return fs.createReadStream(caminhoArquivo).pipe(res);
 
         console.log('[API] Download de histórico:', arquivo);
     } catch (erro) {
@@ -469,14 +488,27 @@ app.get('/api/health', (req, res) => {
     res.json({ status: 'OK' });
 });
 
+app.use((erro, req, res, next) => {
+    console.error('[API] Erro não tratado:', erro);
+    if (res.headersSent) {
+        return next(erro);
+    }
+    return res.status(500).json({
+        sucesso: false,
+        mensagem: erro instanceof Error ? erro.message : 'Erro interno do servidor'
+    });
+});
+
 
 // ============================================================
 // INICIAR SERVIDOR
 // ============================================================
 
-app.listen(PORT, () => {
-    console.log(`================================`);
-    console.log(`Servidor iniciado na porta ${PORT}`);
-    console.log(`Acesse: http://localhost:${PORT}`);
-    console.log(`================================`);
-});
+if (require.main === module) {
+    app.listen(PORT, () => {
+        console.log(`Servidor iniciado na porta ${PORT}`);
+        console.log(`Acesse: http://localhost:${PORT}`);
+    });
+}
+
+module.exports = app;
