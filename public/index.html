@@ -122,6 +122,22 @@
             background: #e0e0e0;
         }
 
+        .btn-historico {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        .btn-historico:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(245, 87, 108, 0.4);
+        }
+
+        .btn-historico:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
         .loading {
             display: none;
             text-align: center;
@@ -379,6 +395,142 @@
         .info.ativo {
             display: block;
         }
+
+        /* Modal de Histórico */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-overlay.ativo {
+            display: flex;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            padding: 30px;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 15px;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            color: #333;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #999;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-close:hover {
+            color: #333;
+        }
+
+        .historico-vazio {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+
+        .historico-vazio p {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        .historico-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .historico-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border: 1px solid #f0f0f0;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            background: #fafafa;
+        }
+
+        .historico-item:hover {
+            background: #f5f5f5;
+        }
+
+        .historico-info {
+            flex: 1;
+        }
+
+        .historico-nome {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .historico-meta {
+            font-size: 12px;
+            color: #999;
+        }
+
+        .historico-tamanho {
+            margin-right: 20px;
+            color: #666;
+            font-size: 12px;
+        }
+
+        .historico-download {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .historico-download:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .historico-download:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
     </style>
 </head>
 <body>
@@ -400,6 +552,7 @@
 
         <div class="button-group">
             <button class="btn-upload" id="btnUpload">📤 Enviar Arquivo</button>
+            <button class="btn-historico" id="btnHistorico">📋 Histórico</button>
             <button class="btn-limpar" id="btnLimpar">🗑️ Limpar</button>
         </div>
 
@@ -476,6 +629,17 @@
         </div>
     </div>
 
+    <!-- Modal de Histórico -->
+    <div class="modal-overlay" id="modalHistorico">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>📋 Histórico de Downloads</h2>
+                <button class="modal-close" id="modalClose">✕</button>
+            </div>
+            <ul class="historico-list" id="historicoList"></ul>
+        </div>
+    </div>
+
     <script>
         const arquivoInput = document.getElementById('arquivo');
         const btnUpload = document.getElementById('btnUpload');
@@ -523,15 +687,19 @@
 
                 console.log('[DEBUG] Enviando dados:', dadosSucesso);
 
+                const payload = JSON.stringify({
+                    dados: dadosSucesso
+                });
+                const tamanhoPayload = new Blob([payload]).size;
+                console.log('[DEBUG] Tamanho do payload:', (tamanhoPayload / 1024 / 1024).toFixed(2), 'MB');
+
                 // Enviar dados para o servidor gerar o Excel
                 fetch('/api/exportar-excel', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({
-                        dados: dadosSucesso
-                    })
+                    body: payload
                 })
                 .then(response => {
                     console.log('[DEBUG] Response status:', response.status);
@@ -540,6 +708,8 @@
                     if (!response.ok) {
                         return response.json().then(err => {
                             throw new Error(err.mensagem || `HTTP ${response.status}`);
+                        }).catch(() => {
+                            throw new Error(`HTTP ${response.status}: Erro ao processar resposta`);
                         });
                     }
                     return response.blob();
@@ -792,6 +962,101 @@
 
         // Foco inicial
         arquivoInput.focus();
+
+        // ========================================
+        // HISTÓRICO DE ARQUIVOS
+        // ========================================
+
+        const btnHistorico = document.getElementById('btnHistorico');
+        const modalOverlay = document.getElementById('modalHistorico');
+        const modalClose = document.getElementById('modalClose');
+        const historicoList = document.getElementById('historicoList');
+
+        // Abrir modal de histórico
+        btnHistorico.addEventListener('click', async () => {
+            try {
+                btnHistorico.disabled = true;
+                historicoList.innerHTML = '<div class="historico-vazio"><p>Carregando...</p></div>';
+                modalOverlay.classList.add('ativo');
+
+                const response = await fetch('/api/historico');
+                const data = await response.json();
+
+                if (!data.sucesso || !data.arquivos || data.arquivos.length === 0) {
+                    historicoList.innerHTML = '<div class="historico-vazio"><p>Nenhum arquivo no histórico</p></div>';
+                    btnHistorico.disabled = false;
+                    return;
+                }
+
+                historicoList.innerHTML = '';
+                data.arquivos.forEach(arquivo => {
+                    const tamanhoMB = (arquivo.tamanho / 1024 / 1024).toFixed(2);
+                    const item = document.createElement('li');
+                    item.className = 'historico-item';
+                    item.innerHTML = `
+                        <div class="historico-info">
+                            <div class="historico-nome">${arquivo.nome}</div>
+                            <div class="historico-meta">${arquivo.dataFormatada}</div>
+                        </div>
+                        <div class="historico-tamanho">${tamanhoMB} MB</div>
+                        <button class="historico-download" data-arquivo="${arquivo.nome}">📥 Download</button>
+                    `;
+                    historicoList.appendChild(item);
+                });
+
+                // Adicionar listeners aos botões de download
+                document.querySelectorAll('.historico-download').forEach(btn => {
+                    btn.addEventListener('click', async (e) => {
+                        const nomeArquivo = e.target.dataset.arquivo;
+                        e.target.disabled = true;
+                        e.target.textContent = '⏳ Baixando...';
+                        
+                        try {
+                            const response = await fetch(`/api/historico/download/${encodeURIComponent(nomeArquivo)}`);
+                            if (!response.ok) {
+                                throw new Error(`HTTP ${response.status}`);
+                            }
+                            
+                            const blob = await response.blob();
+                            const url = window.URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = nomeArquivo;
+                            document.body.appendChild(a);
+                            a.click();
+                            window.URL.revokeObjectURL(url);
+                            document.body.removeChild(a);
+                            
+                            e.target.textContent = '📥 Download';
+                            e.target.disabled = false;
+                        } catch (erro) {
+                            console.error('[DEBUG] Erro ao baixar:', erro);
+                            alert('Erro ao fazer download: ' + erro.message);
+                            e.target.textContent = '📥 Download';
+                            e.target.disabled = false;
+                        }
+                    });
+                });
+
+                btnHistorico.disabled = false;
+            } catch (erro) {
+                console.error('[DEBUG] Erro ao carregar histórico:', erro);
+                historicoList.innerHTML = '<div class="historico-vazio"><p>Erro ao carregar histórico</p></div>';
+                btnHistorico.disabled = false;
+            }
+        });
+
+        // Fechar modal
+        modalClose.addEventListener('click', () => {
+            modalOverlay.classList.remove('ativo');
+        });
+
+        // Fechar ao clicar fora da modal
+        modalOverlay.addEventListener('click', (e) => {
+            if (e.target === modalOverlay) {
+                modalOverlay.classList.remove('ativo');
+            }
+        });
     </script>
 </body>
 </html>

@@ -31,10 +31,14 @@ const PORT = process.env.PORT || 3000;
 // ============================================================
 
 const uploadDir = path.join(__dirname, 'upload', 'dados');
+const historicoDir = path.join(__dirname, 'historico');
 
-// Garantir que a pasta existe
+// Garantir que as pastas existem
 if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
+}
+if (!fs.existsSync(historicoDir)) {
+    fs.mkdirSync(historicoDir, { recursive: true });
 }
 
 const storage = multer.diskStorage({
@@ -66,7 +70,8 @@ const upload = multer({
 // MIDDLEWARES
 // ============================================================
 
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 
@@ -299,6 +304,11 @@ app.post('/api/exportar-excel', (req, res) => {
         const dataAtual = new Date().toISOString().split('T')[0];
         const nomeArquivo = `contratos_${dataAtual}_${Date.now()}.xlsx`;
 
+        // Salvar arquivo no histórico
+        const caminhoHistorico = path.join(historicoDir, nomeArquivo);
+        fs.writeFileSync(caminhoHistorico, buffer);
+        console.log('[API] Arquivo salvo no histórico:', caminhoHistorico);
+
         res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         res.setHeader('Content-Disposition', `attachment; filename="${nomeArquivo}"`);
         res.send(buffer);
@@ -311,6 +321,141 @@ app.post('/api/exportar-excel', (req, res) => {
         return res.status(500).json({
             sucesso: false,
             mensagem: 'Erro ao gerar planilha: ' + (erro instanceof Error ? erro.message : String(erro))
+        });
+    }
+});
+
+
+// ============================================================
+// ROTA: LIMPAR PASTA DE UPLOADS
+// ============================================================
+
+app.post('/api/limpar-uploads', (req, res) => {
+    try {
+        console.log('[API] Limpando pasta de uploads...');
+
+        if (!fs.existsSync(uploadDir)) {
+            return res.json({
+                sucesso: true,
+                mensagem: 'Pasta de uploads não encontrada'
+            });
+        }
+
+        // Ler todos os arquivos da pasta
+        const arquivos = fs.readdirSync(uploadDir);
+
+        let deletados = 0;
+
+        // Deletar cada arquivo
+        arquivos.forEach(arquivo => {
+            try {
+                const caminhoCompleto = path.join(uploadDir, arquivo);
+                
+                // Verificar se é arquivo
+                if (fs.statSync(caminhoCompleto).isFile()) {
+                    fs.unlinkSync(caminhoCompleto);
+                    deletados++;
+                    console.log(`[API] Deletado: ${arquivo}`);
+                }
+            } catch (erro) {
+                console.error(`[API] Erro ao deletar ${arquivo}:`, erro.message);
+            }
+        });
+
+        console.log(`[API] Total de arquivos deletados: ${deletados}`);
+
+        return res.json({
+            sucesso: true,
+            mensagem: `${deletados} arquivo(s) deletado(s)`,
+            deletados: deletados
+        });
+
+    } catch (erro) {
+        console.error('[API] Erro ao limpar uploads:', erro);
+        return res.status(500).json({
+            sucesso: false,
+            mensagem: 'Erro ao limpar uploads: ' + erro.message
+        });
+    }
+});
+
+
+// ============================================================
+// ROTA: LISTAR ARQUIVOS DO HISTÓRICO
+// ============================================================
+
+app.get('/api/historico', (req, res) => {
+    try {
+        if (!fs.existsSync(historicoDir)) {
+            return res.json({
+                sucesso: true,
+                arquivos: []
+            });
+        }
+
+        const arquivos = fs.readdirSync(historicoDir).map(arquivo => {
+            const caminhoCompleto = path.join(historicoDir, arquivo);
+            const stats = fs.statSync(caminhoCompleto);
+            return {
+                nome: arquivo,
+                tamanho: stats.size,
+                data: stats.mtime.toISOString(),
+                dataFormatada: new Date(stats.mtime).toLocaleString('pt-BR')
+            };
+        }).sort((a, b) => new Date(b.data) - new Date(a.data));
+
+        res.json({
+            sucesso: true,
+            arquivos: arquivos
+        });
+    } catch (erro) {
+        console.error('[API] Erro ao listar histórico:', erro);
+        res.status(500).json({
+            sucesso: false,
+            mensagem: 'Erro ao listar histórico: ' + erro.message
+        });
+    }
+});
+
+
+// ============================================================
+// ROTA: DOWNLOAD DO HISTÓRICO
+// ============================================================
+
+app.get('/api/historico/download/:arquivo', (req, res) => {
+    try {
+        const { arquivo } = req.params;
+        
+        // Validar nome do arquivo para evitar path traversal
+        if (arquivo.includes('..') || arquivo.includes('/') || arquivo.includes('\\')) {
+            return res.status(400).json({
+                sucesso: false,
+                mensagem: 'Nome de arquivo inválido'
+            });
+        }
+
+        const caminhoArquivo = path.join(historicoDir, arquivo);
+
+        // Verificar se arquivo existe
+        if (!fs.existsSync(caminhoArquivo)) {
+            return res.status(404).json({
+                sucesso: false,
+                mensagem: 'Arquivo não encontrado'
+            });
+        }
+
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="${arquivo}"`);
+        
+        const fileStream = fs.createReadStream(caminhoArquivo);
+        fileStream.pipe(res);
+
+        console.log('[API] Download de histórico:', arquivo);
+    } catch (erro) {
+        console.error('[API] Erro ao fazer download:', erro);
+        res.status(500).json({
+            sucesso: false,
+            mensagem: 'Erro ao fazer download: ' + erro.message
         });
     }
 });
